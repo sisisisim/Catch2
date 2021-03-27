@@ -11,7 +11,6 @@
 
 #include "catch_platform.h"
 #include "catch_compiler_capabilities.h"
-#include "catch_windows_h_proxy.h"
 
 
 #if defined( CATCH_CONFIG_WINDOWS_SEH )
@@ -20,15 +19,13 @@ namespace Catch {
 
     struct FatalConditionHandler {
 
-        static LONG CALLBACK handleVectoredException(PEXCEPTION_POINTERS ExceptionInfo);
         FatalConditionHandler();
         static void reset();
         ~FatalConditionHandler();
 
     private:
         static bool isSet;
-        static ULONG guaranteeSize;
-        static PVOID exceptionHandlerHandle;
+        static void* exceptionHandlerHandle;
     };
 
 } // namespace Catch

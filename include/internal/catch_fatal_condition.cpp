@@ -10,7 +10,9 @@
 #include "catch_fatal_condition.h"
 
 #include "catch_context.h"
+#include "catch_enforce.h"
 #include "catch_interfaces_capture.h"
+#include "catch_windows_h_proxy.h"
 
 #if defined(__GNUC__)
 #    pragma GCC diagnostic push
@@ -43,7 +45,7 @@ namespace Catch {
         { static_cast<DWORD>(EXCEPTION_INT_DIVIDE_BY_ZERO), "Divide by zero error" },
     };
 
-    LONG CALLBACK FatalConditionHandler::handleVectoredException(PEXCEPTION_POINTERS ExceptionInfo) {
+    static LONG CALLBACK handleVectoredException(PEXCEPTION_POINTERS ExceptionInfo) {
         for (auto const& def : signalDefs) {
             if (ExceptionInfo->ExceptionRecord->ExceptionCode == def.id) {
                 reportFatal(def.name);
@@ -58,18 +60,25 @@ namespace Catch {
         isSet = true;
         // 32k seems enough for Catch to handle stack overflow,
         // but the value was found experimentally, so there is no strong guarantee
-        guaranteeSize = 32 * 1024;
-        exceptionHandlerHandle = nullptr;
+        ULONG guaranteeSize = 32 * 1024;
         // Register as first handler in current chain
         exceptionHandlerHandle = AddVectoredExceptionHandler(1, handleVectoredException);
-        // Pass in guarantee size to be filled
-        SetThreadStackGuarantee(&guaranteeSize);
+        if (!exceptionHandlerHandle) {
+            CATCH_RUNTIME_ERROR("Could not register vectored exception handler");
+        }
+        if (!SetThreadStackGuarantee(&guaranteeSize)) {
+            // We do not want to fully error out, because needing
+            // the stack reserve should be rare enough anyway.
+            Catch::cerr() << "Failed to reserve piece of stack."
+                << " Stack overflow will not be reported successfully.";
+        }
     }
 
     void FatalConditionHandler::reset() {
         if (isSet) {
+            // We do not attempt to unset the stack guarantee, because
+            // Windows does not support lowering the guarantee.
             RemoveVectoredExceptionHandler(exceptionHandlerHandle);
-            SetThreadStackGuarantee(&guaranteeSize);
             exceptionHandlerHandle = nullptr;
             isSet = false;
         }
@@ -80,7 +89,6 @@ namespace Catch {
     }
 
 bool FatalConditionHandler::isSet = false;
-ULONG FatalConditionHandler::guaranteeSize = 0;
 PVOID FatalConditionHandler::exceptionHandlerHandle = nullptr;
 
 
@@ -94,7 +102,7 @@ namespace Catch {
         int id;
         const char* name;
     };
-    
+
     // 32kb for the alternate stack seems to be sufficient. However, this value
     // is experimentally determined, so that's not guaranteed.
     static constexpr std::size_t sigStackSize = 32768 >= MINSIGSTKSZ ? 32768 : MINSIGSTKSZ;
